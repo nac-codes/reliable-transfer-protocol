@@ -25,8 +25,8 @@ Each MRT segment contains the following fields:
 | Seq | 4 | Sequence number |
 | Ack | 4 | Acknowledgment number |
 | Window | 2 | Advertised window size |
-| Checksum | 4 | Error detection code |
-| Payload Length | 2 | Length of payload data |
+| Checksum | 8 | Error detection code |
+| Payload Length | 4 | Length of payload data (up to 9000 bytes) |
 | Payload | Variable | Application data (0 to segment_size bytes) |
 
 ## Segment Types
@@ -110,9 +110,3 @@ Flow control is implemented to prevent overwhelming the receiver:
 - Very high bit error rates can lead to performance degradation as most segments become corrupted.
 - Segment size is limited to 9000 bytes due to UDP datagram size limitations.
 - The protocol continues retransmission indefinitely rather than giving up after a certain number of attempts.
-
-## Performance Characteristics
-
-- For 5000-byte segments, a bit error rate of 0.00001 provides reliable performance.
-- For 999-byte segments, the protocol can handle bit error rates up to 0.0001 comfortably and 0.001 with increased latency.
-- The protocol can handle packet loss rates up to 10% while still completing transfers successfully.
