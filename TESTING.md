@@ -1,163 +1,147 @@
-# CSEE 4119 Spring 2025, Assignment 2 Testing Document
+# Mini Reliable Transport Protocol Testing
 
-## Test Scenarios and Results
+This document describes the tests performed on the Mini Reliable Transport Protocol (MRT) implementation and the results observed.
 
-This document outlines the test scenarios used to verify the functionality of the Mini Reliable Transport Protocol (MRT). We will test all required features under various network conditions.
+## Test Environment
 
-## 1. Basic Functionality Tests
+- Operating System: MacOS 24.3.0
+- Python Version: 3.9+
+- Network: Local (127.0.0.1)
+- Test File: large_data.txt (large text file used for transfer tests)
 
-### 1.1 Connection Establishment
+## Test Scenarios
 
-**Test Procedure**:
-1. Start server with `python app_server.py 60000 4096`
-2. Start network simulator with `python network.py 51000 127.0.0.1 50000 127.0.0.1 60000 loss.txt`
-3. Start client with `python app_client.py 50000 127.0.0.1 51000 1460`
-4. Verify connection establishment through logs
+### 1. Basic Functionality Testing
 
-**Expected Results**:
-- Three-way handshake completes successfully
-- Log shows SYN, SYN-ACK, and ACK segments
+**Test:** Transfer a small file (1KB) with no network impairments
+**Network Configuration:** Loss rate = 0.0, Bit error rate = 0.0
+**Result:** Successful transfer with 100% data integrity
 
-### 1.2 Data Transfer (No Loss)
+**Test:** Transfer a medium file (1MB) with no network impairments
+**Network Configuration:** Loss rate = 0.0, Bit error rate = 0.0
+**Result:** Successful transfer with 100% data integrity
 
-**Test Procedure**:
-1. Set up a loss file with 0% loss and 0% corruption rate
-2. Run the client and server with the network simulator
-3. Verify data transfer through logs
+### 2. Segment Size Testing
 
-**Expected Results**:
-- All data is transferred correctly
-- Server reports successful data reception
-- Log shows DATA and ACK segments
+**Test:** Transfer with different segment sizes
+**Segment Sizes Tested:** 100, 999, 5000, 9000 bytes
+**Network Configuration:** Loss rate = 0.01, Bit error rate = 0.0001
+**Results:**
+- All segment sizes transferred successfully
+- Larger segments (5000, 9000) showed higher throughput but were more susceptible to bit errors
+- Segment sizes above 9000 bytes resulted in "message too long" errors
 
-## 2. Reliability Tests
+### 3. Loss Rate Testing
 
-### 2.1 Segment Loss Handling
+**Test:** Transfer large_data.txt with different packet loss rates
+**Segment Size:** 999 bytes
+**Network Configurations:**
+1. Loss rate = 0.01, Bit error rate = 0.0
+2. Loss rate = 0.05, Bit error rate = 0.0
+3. Loss rate = 0.10, Bit error rate = 0.0
 
-**Test Procedure**:
-1. Create a loss file with gradually increasing segment loss rates:
-   ```
-   0 0.0 0.0
-   5 0.1 0.0
-   10 0.2 0.0
-   15 0.3 0.0
-   ```
-2. Run the client and server with the network simulator
-3. Verify data transfer through logs
+**Results:**
+- 1% loss: Successful transfer with minimal retransmissions
+- 5% loss: Successful transfer with moderate retransmissions
+- 10% loss: Successful transfer with significant retransmissions but still completed
 
-**Expected Results**:
-- Data transfer should complete despite packet losses
-- Logs should show retransmissions
-- Server should receive all data correctly
+### 4. Bit Error Rate Testing
 
-### 2.2 Data Corruption Handling
+**Test:** Transfer large_data.txt with different bit error rates
+**Segment Size:** 999 bytes
+**Network Configurations:**
+1. Loss rate = 0.0, Bit error rate = 0.0001
+2. Loss rate = 0.0, Bit error rate = 0.001
+3. Loss rate = 0.0, Bit error rate = 0.01
 
-**Test Procedure**:
-1. Create a loss file with bit error rates:
-   ```
-   0 0.0 0.0
-   5 0.0 0.001
-   10 0.0 0.005
-   15 0.0 0.01
-   ```
-2. Run the client and server with the network simulator
-3. Verify data transfer through logs
+**Results:**
+- 0.0001 bit error rate: Successful transfer with occasional corrupted segments
+- 0.001 bit error rate: Successful transfer but with high latency due to frequent retransmissions
+- 0.01 bit error rate: Transfer failed to make progress due to nearly all segments being corrupted
 
-**Expected Results**:
-- Corrupted segments should be detected and discarded
-- Retransmissions should occur for corrupted segments
-- Server should receive all data correctly
+### 5. Combined Impairment Testing
 
-### 2.3 Out-of-order Delivery Handling
+**Test:** Transfer large_data.txt with combined loss and bit errors
+**Network Configurations:**
+1. Loss rate = 0.05, Bit error rate = 0.0001 (moderate impairment)
+2. Loss rate = 0.10, Bit error rate = 0.0001 (severe impairment)
 
-**Test Procedure**:
-1. Check logs to verify out-of-order handling (the network simulator might deliver segments out of order due to retransmissions)
-2. Verify data is delivered in the correct order to the application
+**Results:**
+- Moderate impairment: Successful transfer with increased retransmissions
+- Severe impairment: Successful transfer but with significant delay
 
-**Expected Results**:
-- Log should show out-of-order segments being received
-- Server should buffer out-of-order segments
-- Application should receive data in the correct order
+### 6. Dynamic Network Condition Testing
 
-## 3. Flow Control Tests
-
-### 3.1 Window-based Flow Control
-
-**Test Procedure**:
-1. Run the client with a large data file that exceeds the buffer size
-2. Set server receive buffer to various sizes (1KB, 4KB, 8KB)
-3. Verify data transfer through logs
-
-**Expected Results**:
-- Client should not overwhelm the server
-- Data transfer should complete successfully regardless of buffer size
-- Log should show flow control in action with window management
-
-## 4. Combined Tests
-
-### 4.1 High Latency with Losses
-
-**Test Procedure**:
-1. Create a loss file with high loss and reasonable corruption:
-   ```
-   0 0.1 0.001
-   ```
-2. Run the client and server with the network simulator
-3. Verify data transfer through logs
-
-**Expected Results**:
-- Data transfer should complete despite challenging conditions
-- Logs should show adaptive behavior with retransmissions
-- Server should receive all data correctly
-
-### 4.2 Large Data Transfer
-
-**Test Procedure**:
-1. Create a large data file (>100KB)
-2. Run the client and server with the network simulator
-3. Verify data transfer through logs
-
-**Expected Results**:
-- All data should be segmented properly
-- Data transfer should complete successfully
-- Server should receive all data correctly
-
-## 5. Example Test Output
-
+**Test:** Transfer large_data.txt with changing network conditions over time
+**Network Configuration:**
 ```
-# log_50000.txt (client) - Example excerpt showing connection establishment and data transfer with retransmissions
-
-2025-02-23 14:15:35.123 50000 51000 123 0 SYN 0 SEND
-2025-02-23 14:15:35.223 51000 50000 456 124 SYN-ACK 0 RECV
-2025-02-23 14:15:35.324 50000 51000 124 457 ACK 0 SEND
-2025-02-23 14:15:35.425 50000 51000 124 457 DATA 1000 SEND
-2025-02-23 14:15:35.525 50000 51000 125 457 DATA 1000 SEND
-2025-02-23 14:15:35.625 51000 50000 456 125 ACK 0 RECV
-2025-02-23 14:15:35.825 50000 51000 125 457 DATA 1000 RESEND
-2025-02-23 14:15:35.925 51000 50000 456 126 ACK 0 RECV
-...
+0 0.0 0.0
+5 0.01 0.0001
+10 0.02 0.0001
+15 0.1 0.0001
 ```
 
+**Results:**
+- Transfer proceeded quickly during the initial 5 seconds
+- As impairments increased, the protocol adapted with more retransmissions
+- Even with 10% loss rate after 15 seconds, the transfer completed successfully
+
+### 7. Segment Size vs. Bit Error Rate Analysis
+
+**Observation:** The relationship between segment size and tolerable bit error rate was analyzed:
+- For 5000-byte segments: Bit error rates up to 0.00001 worked well
+- For 999-byte segments: Bit error rates up to 0.0001 worked well, and 0.001 was tolerable but slow
+- For small segments (<500 bytes): Higher bit error rates could be tolerated
+
+**Conclusion:** Smaller segments are more resilient to bit errors but reduce overall throughput.
+
+## Sample Log Analysis
+
+Below is an analysis of the logs showing the protocol in action:
+
+### Connection Establishment
+
+The logs show the three-way handshake for connection establishment:
 ```
-# log_60000.txt (server) - Example excerpt showing connection acceptance and data reception
-
-2025-02-23 14:15:35.223 60000 50000 456 124 SYN-ACK 0 SEND
-2025-02-23 14:15:35.323 50000 60000 124 457 ACK 0 RECV
-2025-02-23 14:15:35.425 50000 60000 124 457 DATA 1000 RECV
-2025-02-23 14:15:35.425 60000 50000 456 125 ACK 0 SEND
-2025-02-23 14:15:35.525 50000 60000 125 457 DATA 1000 RECV
-2025-02-23 14:15:35.525 60000 50000 456 126 ACK 0 SEND
-...
+SYN segment sent from client to server
+SYN-ACK segment received from server
+ACK segment sent from client to server
 ```
 
-## 6. Test Results Summary
+### Data Transfer with Corruption
 
-The MRT protocol successfully demonstrated:
-- Reliable data transfer despite segment losses
-- Detection and handling of corrupted segments
-- Proper ordering of data despite out-of-order delivery
-- Flow control to prevent buffer overflow
-- Efficient segmentation and reassembly of large data
-- Adaptability to different network conditions
+The logs show how corrupted segments are handled:
+```
+Checksum mismatch: received ec7f27d0, computed ff428116
+Received corrupted segment from ('127.0.0.1', 51000)
+```
 
-All these capabilities were verified through the log files and successful data transfer between client and server applications.
+### Retransmission on Timeout
+
+The logs show timeout-triggered retransmissions:
+```
+Timeout, retransmitting from segment 229
+Sent segment 229, seq=375, size=978
+```
+
+### Flow Control in Action
+
+The logs show flow control with sliding window:
+```
+Marking segment 227 (seq=373) as acknowledged
+Marking segment 228 (seq=374) as acknowledged
+Received ACK for seq 374, current base seq: 375
+```
+
+## Conclusion
+
+The MRT protocol successfully implements reliable data transfer over UDP with the following characteristics:
+
+1. **Reliability:** Successfully transfers data even with up to 10% packet loss
+2. **Error Handling:** Detects and recovers from bit errors using checksums
+3. **Performance:** Balances throughput and reliability based on segment size
+4. **Limitations:**
+   - Segment size must be below 9000 bytes
+   - Very high bit error rates (>0.001) can prevent successful transfers
+   - For segments of 5000 bytes, optimal bit error rate is 0.00001 or lower
+   - For segments of 999 bytes, optimal bit error rate is 0.0001 or lower

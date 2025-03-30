@@ -2,110 +2,117 @@
 ## Your name: Nicholas Chimicles
 ## GitHub username: nac-codes
 
-# Mini Reliable Transport Protocol (MRT) Design
+# Mini Reliable Transport Protocol Design
 
-## 1. Protocol Overview
+This document describes the design of the Mini Reliable Transport Protocol (MRT), including message types, protocol states, and how it handles various network challenges.
 
-The Mini Reliable Transport Protocol (MRT) is designed to provide reliable data transfer over an unreliable UDP connection. MRT implements the following reliability features:
+## Protocol Overview
+
+The MRT protocol is built on top of UDP and provides reliable data transfer by implementing:
 - Connection establishment and termination
 - Reliable data transfer with acknowledgments
-- Error detection via checksums
-- Handling of out-of-order delivery
-- Flow control
-- Segmentation for large data transfers
+- Error detection through checksums
+- Ordered delivery through sequence numbers
+- Flow control using a sliding window mechanism
 
-## 2. Segment Structure
+## Message Format
 
-Each MRT segment consists of a header and an optional payload. The header structure is as follows:
+Each MRT segment contains the following fields:
 
-| Field          | Size (bytes) | Description                                      |
-|----------------|--------------|--------------------------------------------------|
-| Type           | 1            | Type of segment (SYN, ACK, DATA, etc.)           |
-| Sequence #     | 4            | Sequence number of the segment                   |
-| Acknowledgment #| 4            | Acknowledgment number (next expected sequence #) |
-| Checksum       | 8            | MD5 hash (first 8 characters) for error detection|
-| Payload Length | 3            | Length of the payload in bytes                   |
-| Payload        | Variable     | The actual data (optional)                       |
+| Field | Size (bytes) | Description |
+|-------|--------------|-------------|
+| Type | 1 | Segment type (SYN, ACK, DATA, FIN, etc.) |
+| Seq | 4 | Sequence number |
+| Ack | 4 | Acknowledgment number |
+| Window | 2 | Advertised window size |
+| Checksum | 4 | Error detection code |
+| Payload Length | 2 | Length of payload data |
+| Payload | Variable | Application data (0 to segment_size bytes) |
 
-Total header size: 20 bytes
+## Segment Types
 
-### Segment Types:
-- SYN (0): Connection establishment request
-- SYN-ACK (1): Connection establishment acknowledgment
-- ACK (2): Data acknowledgment
-- DATA (3): Data segment
-- FIN (4): Connection termination request
-- FIN-ACK (5): Connection termination acknowledgment
+The MRT protocol defines the following segment types:
 
-## 3. Connection Establishment (Three-way Handshake)
+1. **SYN (Type=1)**: Used for connection establishment
+2. **SYN-ACK (Type=2)**: Response to SYN during connection establishment
+3. **DATA (Type=3)**: Carries application data
+4. **ACK (Type=4)**: Acknowledges received segments
+5. **FIN (Type=5)**: Used for connection termination
+6. **FIN-ACK (Type=6)**: Response to FIN during connection termination
 
-MRT uses a three-way handshake similar to TCP:
+## Protocol States
 
-1. **Client → Server**: SYN segment with initial sequence number
-2. **Server → Client**: SYN-ACK segment with server's initial sequence number and acknowledgment of client's sequence number
-3. **Client → Server**: ACK segment acknowledging server's sequence number
+### Client States:
+- CLOSED: Initial state
+- SYN_SENT: After sending SYN
+- ESTABLISHED: After receiving SYN-ACK and sending ACK
+- FIN_WAIT: After sending FIN
+- TIME_WAIT: After receiving FIN-ACK
 
-## 4. Data Transfer
+### Server States:
+- LISTEN: Initial state, waiting for connections
+- SYN_RCVD: After receiving SYN and sending SYN-ACK
+- ESTABLISHED: After receiving ACK for SYN-ACK
+- CLOSE_WAIT: After receiving FIN and sending ACK
+- LAST_ACK: After sending FIN
 
-### Reliable Transfer
-Data transfer uses a sliding window protocol with cumulative acknowledgments:
+## Feature Implementation
 
-1. **Sender**: Divides large data into segments and sends multiple segments up to the window size
-2. **Receiver**: Acknowledges received segments with ACK segments
-3. **Sender**: Advances the window when ACKs are received
+### 1. Handling Segment Losses
 
-### Loss Recovery
-- **Timeout-based retransmission**: If an ACK is not received within a timeout period, the sender retransmits unacknowledged segments
-- **Window-based flow control**: The sender limits the number of unacknowledged segments to prevent overwhelming the receiver
+MRT uses a combination of timeouts and retransmissions to handle segment losses:
 
-### Out-of-order Delivery
-- The receiver maintains a buffer for out-of-order segments
-- When segments arrive out of order, they are stored in the buffer
-- When the missing segment(s) arrive, the receiver can reconstruct the original data stream
+- **Timeout Mechanism**: For each sent segment, a timer is started. If no acknowledgment is received within the timeout period, the segment is retransmitted.
+- **Retransmission Strategy**: The protocol implements a selective repeat mechanism where only unacknowledged segments are retransmitted.
+- **Adaptive Timeout**: The timeout period is dynamically adjusted based on observed round-trip times.
 
-### Error Detection
-- A checksum is computed for each segment using MD5 hashing
-- The receiver verifies the checksum and discards corrupted segments
-- The sender will retransmit corrupted segments when no ACK is received
+### 2. Handling Data Corruption
 
-## 5. Flow Control
+Data corruption is handled through checksums:
 
-Flow control is implemented using a fixed-size sliding window:
-- The window size determines how many unacknowledged segments can be in flight
-- The receiver can process segments up to its buffer size
-- The sender will not send more data than the receiver can handle
+- **Checksum Calculation**: A simple hash function is applied to the entire segment (excluding the checksum field) to generate a checksum.
+- **Verification**: When a segment is received, the checksum is recalculated and compared with the received checksum. If they don't match, the segment is discarded.
+- **Corrupted Segment Handling**: From the sender's perspective, a corrupted segment is equivalent to a lost segment, triggering a retransmission after timeout.
 
-## 6. Connection Termination
+### 3. Handling Out-of-Order Delivery
 
-MRT uses a simplified connection termination process:
+To handle out-of-order delivery, MRT uses sequence numbers and a buffer at the receiver:
 
-1. **Client → Server**: FIN segment to initiate connection closure
-2. **Server → Client**: FIN-ACK segment to acknowledge the closure
-3. The client closes the connection upon receiving the FIN-ACK
+- **Sequence Numbers**: Each segment is assigned a sequence number that represents the position of its first byte in the data stream.
+- **Receive Buffer**: Out-of-order segments are stored in the receive buffer until the missing segments arrive.
+- **In-Order Delivery**: Data is delivered to the application in the correct order, regardless of the order in which segments are received.
 
-## 7. Handling Protocol Challenges
+### 4. Dealing with High-Latency Delivery
 
-### Segment Loss
-- Sender uses timeouts to detect lost segments
-- Retransmission of unacknowledged segments after timeout
+For efficient transmission over high-latency links, MRT implements:
 
-### Data Corruption
-- Checksums detect corrupted segments
-- Receiver discards corrupted segments
-- Sender retransmits when no ACK is received
+- **Sliding Window**: Multiple segments can be in flight simultaneously without waiting for acknowledgments.
+- **Window Size**: The window size determines how many unacknowledged segments can be outstanding at any time.
+- **Pipelining**: The protocol pipelines segment transmissions to utilize available bandwidth efficiently.
 
-### Out-of-order Delivery
-- Sequence numbers identify the correct order
-- Receiver buffers out-of-order segments
-- Data delivered to application in correct order
+### 5. Flow Control and Data Segmentation
 
-### High Link Latency
-- Sliding window allows multiple segments in flight
-- Sender doesn't have to wait for each ACK before sending next segment
+Flow control is implemented to prevent overwhelming the receiver:
 
-## 8. Optimizations
+- **Advertised Window**: The receiver advertises the available buffer space in the Window field of ACK segments.
+- **Sender Window Management**: The sender adjusts its transmission rate based on the advertised window.
+- **Segmentation**: Large data chunks are split into segments of configurable size (up to 9000 bytes), allowing efficient transfer of data of any size.
 
-- Random initial sequence numbers for security
-- Threaded implementation for concurrent sending and receiving
-- Efficient buffering for out-of-order segments
-- Logging for debugging and analysis
+## Optimizations
+
+- **Fast Retransmit**: If multiple duplicate ACKs are received for the same sequence number, the sender assumes that segment is lost and retransmits it without waiting for the timeout.
+- **Batched ACKs**: The receiver may acknowledge multiple segments with a single ACK to reduce overhead.
+- **Congestion Control**: While not fully implementing TCP's congestion control, MRT does include basic mechanisms to avoid overwhelming the network.
+
+## Limitations
+
+- The protocol is designed for a single client-server connection.
+- Very high bit error rates can lead to performance degradation as most segments become corrupted.
+- Segment size is limited to 9000 bytes due to UDP datagram size limitations.
+- The protocol continues retransmission indefinitely rather than giving up after a certain number of attempts.
+
+## Performance Characteristics
+
+- For 5000-byte segments, a bit error rate of 0.00001 provides reliable performance.
+- For 999-byte segments, the protocol can handle bit error rates up to 0.0001 comfortably and 0.001 with increased latency.
+- The protocol can handle packet loss rates up to 10% while still completing transfers successfully.

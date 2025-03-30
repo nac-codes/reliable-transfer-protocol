@@ -23,6 +23,7 @@ FIN_ACK = 5
 # Constants
 MAX_RETRIES = 10
 TIMEOUT = 0.5  # 500ms timeout
+UDP_MAX_SIZE = 9000  # Soft limit of 9000 bytes to avoid "message too long" errors
 
 class Client:
     def init(self, src_port, dst_addr, dst_port, segment_size):
@@ -38,17 +39,19 @@ class Client:
         self.src_port = src_port
         self.dst_addr = dst_addr
         self.dst_port = dst_port
-        self.segment_size = segment_size
+        self.segment_size = min(segment_size, UDP_MAX_SIZE)  # Ensure segment_size doesn't exceed UDP limits
         self.seq_num = random.randint(0, 1000)  # Initial sequence number
         self.ack_num = 0
         self.connected = False
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('', src_port))
         self.socket.settimeout(TIMEOUT)
-        self.header_size = 20  # 1(type) + 4(seq) + 4(ack) + 8(checksum) + 3(payload_len)
-        self.max_payload_size = segment_size - self.header_size
-        self.log_file = open(f"client_log_{src_port}.txt", "w")
+        self.header_size = 21  # 1(type) + 4(seq) + 4(ack) + 8(checksum) + 4(payload_len)
+        self.max_payload_size = min(self.segment_size - self.header_size, UDP_MAX_SIZE - self.header_size)
+        self.log_file = open(f"log_{src_port}.txt", "w")
         self.lock = threading.Lock()
+        
+        print(f"Initialized client with max payload size: {self.max_payload_size} bytes")
 
     def _compute_checksum(self, data):
         """Compute a simple checksum for data verification."""
@@ -58,17 +61,17 @@ class Client:
         """
         Create a segment with the specified parameters.
         
-        Format: |type(1B)|seq(4B)|ack(4B)|checksum(8B)|payload_len(3B)|payload|
+        Format: |type(1B)|seq(4B)|ack(4B)|checksum(8B)|payload_len(4B)|payload|
         """
-        # Header: type(1) + seq(4) + ack(4) + checksum(8) + payload_len(3) = 20 bytes
+        # Header: type(1) + seq(4) + ack(4) + checksum(8) + payload_len(4) = 21 bytes
         payload_len = len(payload)
         
         # Create the segment without checksum
-        segment = struct.pack(f'!BII3s{payload_len}s', 
+        segment = struct.pack(f'!BII4s{payload_len}s', 
                              seg_type, 
                              seq_num, 
                              ack_num, 
-                             str(payload_len).zfill(3).encode(), 
+                             str(payload_len).zfill(4).encode(), 
                              payload)
         
         # Compute checksum
@@ -83,7 +86,7 @@ class Client:
         """Parse a received segment and verify its integrity."""
         try:
             # Ensure the segment is long enough for basic header
-            if len(segment) < 20:
+            if len(segment) < 21:
                 print(f"Segment too short: {len(segment)} bytes")
                 return None, None, None, None, None
 
@@ -101,7 +104,7 @@ class Client:
                 print(f"Checksum mismatch: received {received_checksum}, computed {computed_checksum}")
                 return None, None, None, None, None  # Corrupted segment
             
-            payload_len_str = segment[17:20].decode()
+            payload_len_str = segment[17:21].decode()
             try:
                 payload_len = int(payload_len_str)
             except:
@@ -109,11 +112,11 @@ class Client:
                 return None, None, None, None, None
                 
             # Ensure the segment includes the full payload
-            if len(segment) < 20 + payload_len:
-                print(f"Incomplete segment: expected {20 + payload_len} bytes, got {len(segment)}")
+            if len(segment) < 21 + payload_len:
+                print(f"Incomplete segment: expected {21 + payload_len} bytes, got {len(segment)}")
                 return None, None, None, None, None
                 
-            payload = segment[20:20+payload_len]
+            payload = segment[21:21+payload_len]
             
             return seg_type, seq_num, ack_num, payload_len, payload
             
@@ -221,9 +224,17 @@ class Client:
         
         while data_pos < len(data):
             # Calculate payload size for this segment
-            # Limit to max size of 999 bytes to ensure payload length fits in 3 characters
-            # This prevents the truncation issue where "1440" becomes "144"
-            payload_size = min(self.max_payload_size, len(data) - data_pos, 999)
+            # Limit to the minimum of:
+            # 1. Max payload size allowed by header
+            # 2. Remaining data to send
+            # 3. 9999 (4-digit limit)
+            # 4. UDP datagram size limit
+            payload_size = min(
+                self.max_payload_size,
+                len(data) - data_pos,
+                9999,
+                UDP_MAX_SIZE - self.header_size
+            )
             payload = data[data_pos:data_pos + payload_size]
             
             # Create segment with current sequence number
@@ -251,9 +262,12 @@ class Client:
             # Send segments in window
             while next_to_send < base + window_size and next_to_send < len(segments):
                 segment, seq_num, payload_size = segments[next_to_send]
-                self.socket.sendto(segment, (self.dst_addr, self.dst_port))
-                self._log_segment(self.src_port, self.dst_port, seq_num, self.ack_num, DATA, payload_size)
-                print(f"Sent segment {next_to_send}, seq={seq_num}, size={payload_size}")
+                try:
+                    self.socket.sendto(segment, (self.dst_addr, self.dst_port))
+                    self._log_segment(self.src_port, self.dst_port, seq_num, self.ack_num, DATA, payload_size)
+                    print(f"Sent segment {next_to_send}, seq={seq_num}, size={payload_size}")
+                except Exception as e:
+                    print(f"Error sending segment {next_to_send}: {e}")
                 
                 # Start timer for the oldest unacknowledged segment if not already running
                 if timer is None:

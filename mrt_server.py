@@ -25,6 +25,7 @@ FIN_ACK = 5
 MAX_RETRIES = 10
 TIMEOUT = 0.5  # 500ms timeout
 BUFFER_THRESHOLD = 0.8  # When buffer is 80% full, slow down
+UDP_MAX_SIZE = 9000  # Soft limit of 9000 bytes to avoid "message too long" errors
 
 # Enable or disable detailed debugging
 DEBUG = False
@@ -77,9 +78,9 @@ class Server:
         receive_buffer_size -- the buffer size for receiving segments
         """
         self.listen_port = listen_port
-        self.receive_buffer_size = receive_buffer_size
+        self.receive_buffer_size = min(receive_buffer_size, UDP_MAX_SIZE)  # Ensure buffer size doesn't exceed UDP limits
         
-        print(f"Initializing server on port {listen_port} with buffer size {receive_buffer_size}")
+        print(f"Initializing server on port {listen_port} with buffer size {self.receive_buffer_size}")
         
         # Create UDP socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -102,17 +103,17 @@ class Server:
         """
         Create a segment with the specified parameters.
         
-        Format: |type(1B)|seq(4B)|ack(4B)|checksum(8B)|payload_len(3B)|payload|
+        Format: |type(1B)|seq(4B)|ack(4B)|checksum(8B)|payload_len(4B)|payload|
         """
-        # Header: type(1) + seq(4) + ack(4) + checksum(8) + payload_len(3) = 20 bytes
+        # Header: type(1) + seq(4) + ack(4) + checksum(8) + payload_len(4) = 21 bytes
         payload_len = len(payload)
         
         # Create the segment without checksum
-        segment = struct.pack(f'!BII3s{payload_len}s', 
+        segment = struct.pack(f'!BII4s{payload_len}s', 
                              seg_type, 
                              seq_num, 
                              ack_num, 
-                             str(payload_len).zfill(3).encode('ascii'), 
+                             str(payload_len).zfill(4).encode('ascii'), 
                              payload)
         
         # Compute checksum
@@ -127,7 +128,7 @@ class Server:
         """Parse a received segment and verify its integrity."""
         try:
             # Ensure the segment is long enough for basic header
-            if len(segment) < 20:
+            if len(segment) < 21:
                 print(f"Segment too short: {len(segment)} bytes")
                 return None, None, None, None, None
 
@@ -157,20 +158,20 @@ class Server:
             
             # Use try-except for payload length decoding as well
             try:
-                payload_len_str = segment[17:20].decode('ascii')
+                payload_len_str = segment[17:21].decode('ascii')
                 payload_len = int(payload_len_str)
             except (UnicodeDecodeError, ValueError):
                 print(f"Invalid payload length: cannot decode or convert to integer")
                 if DEBUG:
-                    debug_print(f"Corrupted payload length bytes: {binascii.hexlify(segment[17:20])}")
+                    debug_print(f"Corrupted payload length bytes: {binascii.hexlify(segment[17:21])}")
                 return None, None, None, None, None
                 
             # Ensure the segment includes the full payload
-            if len(segment) < 20 + payload_len:
-                print(f"Incomplete segment: expected {20 + payload_len} bytes, got {len(segment)}")
+            if len(segment) < 21 + payload_len:
+                print(f"Incomplete segment: expected {21 + payload_len} bytes, got {len(segment)}")
                 return None, None, None, None, None
                 
-            payload = segment[20:20+payload_len]
+            payload = segment[21:21+payload_len]
             
             # Debug payload data (first few bytes)
             if DEBUG and payload_len > 0:
