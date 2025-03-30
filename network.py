@@ -69,19 +69,40 @@ def handleMessage(ns, ca, sa, st):
     buff_size = 2000000000
     while True:
         c, a = ns.recvfrom(buff_size)
+        print(f"Network received {len(c)} bytes from {a}")
+        
         pktLoss, bitError = getCurrentLoss(st)
+        print(f"Current loss rate: {pktLoss}, bit error rate: {bitError}")
+        
         if random.random() <= pktLoss:
+            print(f"Dropping packet from {a} due to packet loss")
             continue
         else:
             d = bytearray(c)
+            
+            # Check if any bit errors occurred
+            bit_errors = 0
             for i in range(len(d)):
                 for j in range(8):
                     if random.random() <= bitError:
                         d[i] = d[i] ^ (1 << j)
+                        bit_errors += 1
+            
+            if bit_errors > 0:
+                print(f"Applied {bit_errors} bit errors to packet")
+                
+            # Identify segment type if possible (first byte)
+            if len(d) > 0:
+                seg_type = d[0]
+                type_str = {0: "SYN", 1: "SYN-ACK", 2: "ACK", 3: "DATA", 4: "FIN", 5: "FIN-ACK"}.get(seg_type, "UNKNOWN")
+                print(f"Forwarding {type_str} segment")
+                
             if a == sa:
-              ns.sendto(d, ca)
+                print(f"Forwarding packet from server {sa} to client {ca}")
+                ns.sendto(d, ca)
             else:
-              ns.sendto(d, sa)
+                print(f"Forwarding packet from client {a} to server {sa}")
+                ns.sendto(d, sa)
   
 if __name__ == '__main__':
     # accepts commandline arguments
